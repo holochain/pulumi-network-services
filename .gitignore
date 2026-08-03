@@ -1,0 +1,6 @@
+# Go workspace files are for local cross-repo development only.
+go.work
+go.work.sum
+
+# Build output
+/bin/

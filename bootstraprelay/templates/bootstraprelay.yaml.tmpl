@@ -1,0 +1,53 @@
+#cloud-config
+
+write_files:
+  - content: |
+      [Container]
+      Image={{ .ContainerImage }}
+      Exec=kitsune2-bootstrap-srv --production --listen [::]:443 --tls-cert /etc/letsencrypt/live/{{ .Hostname }}/fullchain.pem --tls-key /etc/letsencrypt/live/{{ .Hostname }}/privkey.pem{{ range .ExtraArgs }} {{ . }}{{ end }}
+      Environment=RUST_LOG={{ .RustLog }}
+      Network=host
+      Volume=/etc/letsencrypt:/etc/letsencrypt:ro
+
+      [Service]
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target default.target
+    path: /etc/containers/systemd/bootstrap.container
+    permissions: "0644"
+
+  - content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      # Restart journald so its storage directory matches the machine ID
+      # that cloud-init may have reinitialized.
+      systemctl restart systemd-journald
+
+      apt-get update -y
+      apt-get install -y podman certbot
+
+      max_attempts=30
+      delay=20
+
+      for attempt in $(seq 1 $max_attempts); do
+        echo "Certbot attempt $attempt of $max_attempts..."
+        if certbot certonly --standalone -d {{ .Hostname }} --non-interactive --agree-tos -m {{ .ContactEmail }}; then
+          echo "Certificate obtained successfully."
+          systemctl daemon-reload
+          systemctl start bootstrap
+          exit 0
+        fi
+        sleep_for=$((delay * attempt))
+        echo "Certbot failed. Retrying in ${sleep_for}s..."
+        sleep "$sleep_for"
+      done
+
+      echo "Failed to obtain certificate after $max_attempts attempts."
+      exit 1
+    path: /opt/bootstrap_srv/provision-cert.sh
+    permissions: "0755"
+
+runcmd:
+  - /opt/bootstrap_srv/provision-cert.sh
