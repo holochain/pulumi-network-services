@@ -1,0 +1,104 @@
+name: CI
+
+# Every `uses:` in this repository is pinned to a full commit SHA, with the human
+# readable version in a trailing comment. Tags and branches can be moved to point
+# at different code after review; a SHA cannot. Keep new actions pinned the same
+# way — update the SHA and the comment together.
+
+on:
+  workflow_dispatch: {}
+  pull_request: {}
+  push:
+    branches:
+      - main
+
+# Pull request code runs after checkout, so give it no more than it needs.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ./go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -v
+
+  lint_cloud_init:
+    # Pinned to the release the component deploys (defaultOsImage is
+    # ubuntu-26-04-x64) rather than ubuntu-latest, because cloud-init is installed
+    # from the runner's package index. Linting against a different cloud-init than
+    # the one that will parse the file is how a schema difference gets missed.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ./go.mod
+      - name: Update apt index
+        run: sudo apt-get update
+      - name: Install cloud-init
+        run: sudo apt-get install -y cloud-init
+      # The rendered cloud-init is not committed, so render it here and lint what
+      # the component would actually deploy. Rendering and linting share one step
+      # so the output directory never has to survive a step boundary.
+      - name: Render and lint cloud-init
+        run: |
+          status=0
+          dump_dir="$(mktemp -d)"
+          CLOUD_INIT_DUMP_DIR="$dump_dir" go test ./bootstraprelay/ -run TestDumpRenderedCloudInit -v
+
+          shopt -s nullglob
+          files=("$dump_dir"/*.yaml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::no rendered cloud-init files were produced"
+            ls -la "$dump_dir" || true
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            echo "### $(basename "$file")" >> $GITHUB_STEP_SUMMARY
+            if ! cloud-init schema -c "$file" 2> >(tee stderr.log) >> $GITHUB_STEP_SUMMARY
+            then
+              # Print errors as such in GitHub logs.
+              cat stderr.log | grep "in.*line.*column" -B1 -A1 --no-group-separator | sed -z "s|\([^\n]*\)\n\s*in \"\([^\"]*\)\", line \([[:digit:]]\+\), column \([[:digit:]]\+\):\s*|::error file=$file,title=\1 in \2,line=\3,col=\4::|g"
+              status=1
+            fi
+          done
+          exit $status
+
+  # Comments the changelog entry this PR will generate. The reusable workflow
+  # defaults cliff_config_url to holochain/release-integration's
+  # pre-1.0-cliff.toml, which is the one we want while this library is below 1.0.
+  #
+  # Needs pull-requests: write to post the comment, which the workflow-level
+  # contents: read above does not grant.
+  #
+  # Deliberately not in ci_pass: a preview comment failing should not block a merge.
+  changelog_preview:
+    name: Add comment of changelog preview
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: holochain/actions/.github/workflows/changelog-preview-comment.yml@e9a629cbd174a20a7027edc5afdc615d51089653 # v1.16.0
+
+  ci_pass:
+    if: always()
+    needs:
+      - test
+      - lint_cloud_init
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether the required jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
