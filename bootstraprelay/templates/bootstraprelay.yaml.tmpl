@@ -33,7 +33,7 @@ write_files:
 
       for attempt in $(seq 1 $max_attempts); do
         echo "Certbot attempt $attempt of $max_attempts..."
-        if certbot certonly --standalone -d {{ .Hostname }} --non-interactive --agree-tos -m {{ .ContactEmail }}; then
+        if certbot certonly --standalone -d "{{ .Hostname }}" --non-interactive --agree-tos -m "{{ .ContactEmail }}"; then
           echo "Certificate obtained successfully."
           systemctl daemon-reload
           systemctl start bootstrap

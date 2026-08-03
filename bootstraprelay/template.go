@@ -27,6 +27,10 @@ type templateData struct {
 
 // renderCloudInit produces the cloud-init user data for a bootstrap/relay host.
 func renderCloudInit(data templateData) (string, error) {
+	if err := validate(data); err != nil {
+		return "", err
+	}
+
 	var buf bytes.Buffer
 	if err := cloudInitTemplate.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("render cloud-init: %w", err)
