@@ -10,6 +10,7 @@ package validate
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -67,6 +68,41 @@ func Email(field, email string) error {
 func NoLineBreaks(field, value string) error {
 	if strings.ContainsAny(value, "\r\n") {
 		return fmt.Errorf("%s must not contain line breaks", field)
+	}
+	return nil
+}
+
+// HttpsUrl rejects anything that is not an https URL safe to render as a single
+// command-line argument.
+//
+// Plain http is refused rather than merely discouraged: the values carried over
+// this link are authentication tokens, and the endpoint is reached across the
+// public internet.
+func HttpsUrl(field, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s is required", field)
+	}
+	// Whitespace would split it into two arguments rather than one.
+	if strings.ContainsAny(value, " \t\r\n") {
+		return fmt.Errorf("%s %q contains whitespace", field, value)
+	}
+
+	// Parsed rather than pattern-matched, so the host checked here is the host a
+	// client will actually connect to. Picking it out with string operations gets
+	// this wrong: in https://valid.example:443@not_a_host the text before the "@"
+	// is userinfo, and the real host is what follows it.
+	u, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("%s %q is not a valid URL: %w", field, value, err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("%s %q must be an https:// URL", field, value)
+	}
+	if u.User != nil {
+		return fmt.Errorf("%s %q must not contain credentials", field, value)
+	}
+	if err := Hostname(field+" host", u.Hostname()); err != nil {
+		return fmt.Errorf("%s %q has an invalid host: %w", field, value, err)
 	}
 	return nil
 }

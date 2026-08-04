@@ -13,13 +13,21 @@ type mocks int
 
 func (mocks) NewResource(args pulumi.MockResourceArgs) (string, resource.PropertyMap, error) {
 	outputs := args.Inputs.Copy()
-	if args.TypeToken == "digitalocean:index/droplet:Droplet" {
+	switch args.TypeToken {
+	case "digitalocean:index/droplet:Droplet":
 		outputs["ipv4Address"] = resource.NewStringProperty("203.0.113.10")
 		outputs["ipv6Address"] = resource.NewStringProperty("2001:db8::10")
 		// Numeric, because DigitalOcean droplet IDs are, and the firewall parses
 		// this one as an integer. A non-numeric mock ID makes that conversion
 		// fail, which leaves every downstream output unresolved.
 		return "123456", outputs, nil
+	case "digitalocean:index/databaseCluster:DatabaseCluster":
+		// NewAuthenticated builds an auth server, which needs this to render its
+		// own cloud-init.
+		outputs["privateUri"] = resource.NewStringProperty(
+			"rediss://default:pw@private-db.example.test:25061")
+		outputs["uri"] = resource.NewStringProperty(
+			"rediss://default:pw@public-db.example.test:25061")
 	}
 	return args.Name + "_id", outputs, nil
 }
