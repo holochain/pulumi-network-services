@@ -44,5 +44,8 @@ const (
 	// relay owns 443.
 	portHttp = 80
 
+	// portSsh is opened only when SSH keys are attached. DigitalOcean sets a root
+	// password when a droplet has none, so opening it otherwise would expose
+	// password authentication.
 	portSsh = 22
 )

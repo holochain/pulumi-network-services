@@ -1,0 +1,72 @@
+#cloud-config
+
+write_files:
+  - content: |
+      [Container]
+      Image={{ .ContainerImage }}
+      Exec=hc-auth-server
+      EnvironmentFile=/opt/auth_srv/auth.env
+      Network=host
+      User=0
+      Volume=/etc/letsencrypt:/etc/letsencrypt:ro
+
+      [Service]
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target default.target
+    path: /etc/containers/systemd/auth.container
+    permissions: "0644"
+
+  - content: |
+      GITHUB_CLIENT_ID={{ .GithubClientId }}
+      GITHUB_CLIENT_SECRET={{ .GithubClientSecret }}
+      GITHUB_ORG={{ .GithubOrg }}
+      GITHUB_TEAM={{ .GithubTeam }}
+      HOST=0.0.0.0
+      PORT=443
+      PRODUCTION=true
+      REDIRECT_URI=https://{{ .Hostname }}/ops/oauth-callback
+      SESSION_SECRET={{ .SessionSecret }}
+      MAX_PENDING_REQUESTS={{ .MaxPendingRequests }}
+      API_TOKENS={{ .ApiTokens }}
+      REDIS_URL={{ .RedisUrl }}
+      TLS_CERT=/etc/letsencrypt/live/{{ .Hostname }}/fullchain.pem
+      TLS_KEY=/etc/letsencrypt/live/{{ .Hostname }}/privkey.pem
+    path: /opt/auth_srv/auth.env
+    permissions: "0600"
+
+  - content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      # Restart journald so its storage directory matches the machine ID
+      # that cloud-init may have reinitialized.
+      systemctl restart systemd-journald
+
+      apt-get update -y
+      apt-get install -y podman certbot
+
+      max_attempts=30
+      delay=20
+
+      for attempt in $(seq 1 $max_attempts); do
+        echo "Certbot attempt $attempt of $max_attempts..."
+        if certbot certonly --standalone -d "{{ .Hostname }}" --non-interactive --agree-tos -m "{{ .ContactEmail }}"; then
+          echo "Certificate obtained successfully."
+          systemctl daemon-reload
+          systemctl start auth
+          exit 0
+        fi
+        sleep_for=$((delay * attempt))
+        echo "Certbot failed. Retrying in ${sleep_for}s..."
+        sleep "$sleep_for"
+      done
+
+      echo "Failed to obtain certificate after $max_attempts attempts."
+      exit 1
+    path: /opt/auth_srv/provision-cert.sh
+    permissions: "0755"
+
+runcmd:
+  - /opt/auth_srv/provision-cert.sh

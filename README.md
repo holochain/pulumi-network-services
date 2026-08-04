@@ -146,6 +146,59 @@ relay, err := bootstraprelay.New(ctx, "bootstrap-relay", args,
     }))
 ```
 
+### `authserver`
+
+A Holochain auth server, implementing the sbd authentication hook specification.
+Pair it with `bootstraprelay` to require authentication before peers may use the
+network.
+
+```go
+import "github.com/holochain/pulumi-network-services/authserver"
+
+auth, err := authserver.New(ctx, "auth", &authserver.Args{
+    Hostname:           pulumi.String("auth.example.org"),
+    ContactEmail:       pulumi.String("ops@example.org"),
+    GithubClientId:     cfg.RequireSecret("github-client-id"),
+    GithubClientSecret: cfg.RequireSecret("github-client-secret"),
+    GithubOrg:          pulumi.String("holochain"),
+    GithubTeam:         pulumi.String("auth"),
+    SessionSecret:      cfg.RequireSecret("session-secret"),
+    ApiTokens:          cfg.RequireSecret("api-tokens"),
+})
+```
+
+It creates a droplet, a **managed Valkey cluster**, and firewalls for both. It
+exports `Url`, `OpsUrl`, `Hostname`, `Ipv4Address` and `Ipv6Address`.
+
+#### The database is managed on purpose
+
+Valkey holds the pending and approved keys — the record of who may join the
+network. DigitalOcean user data is immutable, so any configuration change replaces
+the droplet; a containerised database would take that record with it. The cluster
+is a separate resource and survives droplet replacement.
+
+It is reachable only from its own droplet, via a `digitalocean.DatabaseFirewall`,
+and the server connects over the cluster's **private** URI so Valkey traffic never
+crosses the public internet.
+
+#### It is a public service
+
+Unlike a typical internal dependency, this cannot hide behind a private network:
+agents call `/now` and `/request-auth` directly, and the GitHub OAuth callback
+redirects an operator's browser to `/ops`. It needs a public hostname and TLS.
+
+That also means `/authenticate` cannot be restricted to the relay at the network
+layer — it shares a listener with the public endpoints. Its protection is the
+signature on the request, not the firewall.
+
+#### Secrets reach the host through cloud-init
+
+The GitHub client secret, session secret, API tokens and database URI are written
+to `/opt/auth_srv/auth.env` (mode `0600`) by cloud-init. DigitalOcean exposes user
+data through the droplet metadata service, so anything running on the host can read
+them. That is inherent to configuring a droplet this way rather than specific to
+this component, but it is worth knowing before you decide what else runs there.
+
 ## Versioning
 
 The Go API is stable and easy to keep stable. The version of the service you deploy
