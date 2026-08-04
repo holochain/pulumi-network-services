@@ -16,6 +16,9 @@ package bootstraprelay
 import (
 	"errors"
 
+	"github.com/holochain/pulumi-network-services/internal/dofirewall"
+	"github.com/holochain/pulumi-network-services/internal/inputs"
+
 	"github.com/pulumi/pulumi-digitalocean/sdk/v4/go/digitalocean"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
@@ -120,9 +123,9 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 	userData := pulumi.All(
 		hostname,
 		args.ContactEmail.ToStringOutput(),
-		stringOrDefault(args.ContainerImage, DefaultContainerImage),
-		stringOrDefault(args.RustLog, defaultRustLog),
-		stringArrayOrEmpty(args.ExtraArgs),
+		inputs.StringOr(args.ContainerImage, DefaultContainerImage),
+		inputs.StringOr(args.RustLog, defaultRustLog),
+		inputs.StringArrayOrEmpty(args.ExtraArgs),
 	).ApplyT(func(templateArgs []interface{}) (string, error) {
 		return renderCloudInit(templateData{
 			Hostname:       templateArgs[0].(string),
@@ -136,19 +139,29 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 	droplet, err := digitalocean.NewDroplet(ctx, name, &digitalocean.DropletArgs{
 		Name:       pulumi.String(name),
 		Image:      pulumi.String(defaultOsImage),
-		Region:     stringOrDefault(args.Region, defaultRegion),
-		Size:       stringOrDefault(args.Size, defaultSize),
-		Ipv6:       boolPtrOrDefault(args.Ipv6, true),
-		Monitoring: boolPtrOrDefault(args.Monitoring, true),
-		Tags:       stringArrayOrEmpty(args.Tags),
-		SshKeys:    stringArrayOrEmpty(args.SshKeys),
+		Region:     inputs.StringOr(args.Region, defaultRegion),
+		Size:       inputs.StringOr(args.Size, defaultSize),
+		Ipv6:       inputs.BoolPtrOr(args.Ipv6, true),
+		Monitoring: inputs.BoolPtrOr(args.Monitoring, true),
+		Tags:       inputs.StringArrayOrEmpty(args.Tags),
+		SshKeys:    inputs.StringArrayOrEmpty(args.SshKeys),
 		UserData:   userData,
 	}, pulumi.Parent(component))
 	if err != nil {
 		return nil, err
 	}
 
-	firewall, err := newFirewall(ctx, name, component, droplet, args.SshKeys != nil, args.SshSourceAddresses)
+	firewall, err := dofirewall.New(ctx, name, component, droplet, dofirewall.Args{
+		Ports: []dofirewall.Port{
+			dofirewall.TCP(portHttps),
+			dofirewall.UDP(portQad),
+			dofirewall.TCP(portHttp),
+			dofirewall.ICMP,
+		},
+		SshPort:            portSsh,
+		AllowSsh:           args.SshKeys != nil,
+		SshSourceAddresses: args.SshSourceAddresses,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -172,25 +185,4 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 	}
 
 	return component, nil
-}
-
-func stringOrDefault(in pulumi.StringInput, fallback string) pulumi.StringOutput {
-	if in == nil {
-		return pulumi.String(fallback).ToStringOutput()
-	}
-	return in.ToStringOutput()
-}
-
-func boolPtrOrDefault(in pulumi.BoolInput, fallback bool) pulumi.BoolPtrOutput {
-	if in == nil {
-		return pulumi.Bool(fallback).ToBoolPtrOutput()
-	}
-	return in.ToBoolOutput().ToBoolPtrOutput()
-}
-
-func stringArrayOrEmpty(in pulumi.StringArrayInput) pulumi.StringArrayOutput {
-	if in == nil {
-		return pulumi.StringArray{}.ToStringArrayOutput()
-	}
-	return in.ToStringArrayOutput()
 }
