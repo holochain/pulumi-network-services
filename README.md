@@ -51,6 +51,26 @@ attempts over roughly 2.5 hours, after which the provisioning script exits non-z
 and the service does not start. Records created in the same `pulumi up` are fine so
 long as they become resolvable inside that window.
 
+#### Ports
+
+The container runs with host networking, so the server binds the droplet's
+interfaces directly and there is no port mapping to get wrong:
+
+| Port | Protocol | Purpose |
+| --- | --- | --- |
+| 443 | TCP | Bootstrap and relay over HTTPS |
+| 7842 | UDP | QUIC Address Discovery (QAD) |
+
+`--production` enables the QAD listener, which is how peers learn their own public
+address in order to attempt a direct connection. Losing it does not take the service
+down — peers fall back to relaying — so it tends to fail quietly as degraded
+connectivity rather than an outage.
+
+This component creates no firewall, and DigitalOcean droplets have none by default,
+so both ports are reachable as deployed. If you put a `digitalocean.Firewall` in
+front of it, note that 7842 is **UDP**: an inbound rule that only covers TCP will let
+the service look healthy while silently forcing every peer onto the relay.
+
 #### You provide the SSH keys
 
 `SshKeys` is empty by default, which means nobody can SSH into the droplet. Pass the
