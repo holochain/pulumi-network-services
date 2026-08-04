@@ -2,8 +2,8 @@ package bootstraprelay
 
 import (
 	"strings"
-	"sync"
 	"testing"
+	"time"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -16,8 +16,24 @@ func (mocks) NewResource(args pulumi.MockResourceArgs) (string, resource.Propert
 	if args.TypeToken == "digitalocean:index/droplet:Droplet" {
 		outputs["ipv4Address"] = resource.NewStringProperty("203.0.113.10")
 		outputs["ipv6Address"] = resource.NewStringProperty("2001:db8::10")
+		// Numeric, because DigitalOcean droplet IDs are, and the firewall parses
+		// this one as an integer. A non-numeric mock ID makes that conversion
+		// fail, which leaves every downstream output unresolved.
+		return "123456", outputs, nil
 	}
 	return args.Name + "_id", outputs, nil
+}
+
+// awaitApply blocks until an ApplyT callback has run, failing rather than hanging
+// if it never does. An output left unresolved by a failed conversion would
+// otherwise block the test forever and burn the whole CI job.
+func awaitApply(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("ApplyT callback never ran: an output it depends on was never resolved")
+	}
 }
 
 func (mocks) Call(args pulumi.MockCallArgs) (resource.PropertyMap, error) {
@@ -44,8 +60,7 @@ func TestNewAppliesDefaults(t *testing.T) {
 			return err
 		}
 
-		var wg sync.WaitGroup
-		wg.Add(1)
+		done := make(chan struct{})
 		pulumi.All(
 			relay.Droplet.UserData,
 			relay.Droplet.Region,
@@ -54,7 +69,7 @@ func TestNewAppliesDefaults(t *testing.T) {
 			relay.Droplet.Monitoring,
 			relay.Droplet.Ipv6,
 		).ApplyT(func(outputs []interface{}) error {
-			defer wg.Done()
+			defer close(done)
 
 			userData, ok := outputs[0].(*string)
 			if !ok || userData == nil {
@@ -71,8 +86,8 @@ func TestNewAppliesDefaults(t *testing.T) {
 			if got := outputs[1].(string); got != "fra1" {
 				t.Errorf("region = %q, want fra1", got)
 			}
-			if got := outputs[2].(string); got != "s-2vcpu-2gb" {
-				t.Errorf("size = %q, want s-2vcpu-2gb", got)
+			if got := outputs[2].(string); got != "s-2vcpu-4gb" {
+				t.Errorf("size = %q, want s-2vcpu-4gb", got)
 			}
 			if got := outputs[3].(string); got != "ubuntu-26-04-x64" {
 				t.Errorf("os image = %q, want ubuntu-26-04-x64", got)
@@ -85,7 +100,7 @@ func TestNewAppliesDefaults(t *testing.T) {
 			}
 			return nil
 		})
-		wg.Wait()
+		awaitApply(t, done)
 		return nil
 	})
 }
@@ -93,23 +108,23 @@ func TestNewAppliesDefaults(t *testing.T) {
 func TestNewHonoursExplicitArgs(t *testing.T) {
 	run(t, func(ctx *pulumi.Context) error {
 		relay, err := New(ctx, "custom", &Args{
-			Hostname:       pulumi.String("relay.example.test"),
-			ContactEmail:   pulumi.String("ops@example.test"),
-			ContainerImage: pulumi.String("ghcr.io/holochain/kitsune2_bootstrap_srv:v0.9.9"),
-			Region:         pulumi.String("nyc1"),
-			Size:           pulumi.String("s-1vcpu-2gb"),
-			RustLog:        pulumi.String("warn"),
-			Monitoring:     pulumi.Bool(false),
-			SshKeys:        pulumi.StringArray{pulumi.String("aa:bb:cc")},
-			Tags:           pulumi.StringArray{pulumi.String("network-services")},
-			ExtraArgs:      pulumi.StringArray{pulumi.String("--extra-flag")},
+			Hostname:           pulumi.String("relay.example.test"),
+			ContactEmail:       pulumi.String("ops@example.test"),
+			ContainerImage:     pulumi.String("ghcr.io/holochain/kitsune2_bootstrap_srv:v0.9.9"),
+			Region:             pulumi.String("nyc1"),
+			Size:               pulumi.String("s-1vcpu-2gb"),
+			RustLog:            pulumi.String("warn"),
+			Monitoring:         pulumi.Bool(false),
+			SshKeys:            pulumi.StringArray{pulumi.String("aa:bb:cc")},
+			SshSourceAddresses: pulumi.StringArray{pulumi.String("203.0.113.0/24")},
+			Tags:               pulumi.StringArray{pulumi.String("network-services")},
+			ExtraArgs:          pulumi.StringArray{pulumi.String("--extra-flag")},
 		})
 		if err != nil {
 			return err
 		}
 
-		var wg sync.WaitGroup
-		wg.Add(1)
+		done := make(chan struct{})
 		pulumi.All(
 			relay.Droplet.UserData,
 			relay.Droplet.Region,
@@ -119,7 +134,7 @@ func TestNewHonoursExplicitArgs(t *testing.T) {
 			relay.Droplet.Tags,
 			relay.Url,
 		).ApplyT(func(outputs []interface{}) error {
-			defer wg.Done()
+			defer close(done)
 
 			userData, ok := outputs[0].(*string)
 			if !ok || userData == nil {
@@ -158,7 +173,7 @@ func TestNewHonoursExplicitArgs(t *testing.T) {
 			}
 			return nil
 		})
-		wg.Wait()
+		awaitApply(t, done)
 		return nil
 	})
 }
@@ -174,16 +189,15 @@ func TestNewAttachesNoSshKeysByDefault(t *testing.T) {
 			return err
 		}
 
-		var wg sync.WaitGroup
-		wg.Add(1)
+		done := make(chan struct{})
 		relay.Droplet.SshKeys.ApplyT(func(keys []string) error {
-			defer wg.Done()
+			defer close(done)
 			if len(keys) != 0 {
 				t.Errorf("sshKeys = %v, want none", keys)
 			}
 			return nil
 		})
-		wg.Wait()
+		awaitApply(t, done)
 		return nil
 	})
 }

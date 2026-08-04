@@ -4,10 +4,13 @@
 // From Kitsune2 0.5.0, peer discovery (bootstrap) and connection establishment
 // (relay) are a single service, so one component covers both roles.
 //
-// The component creates a droplet and nothing else. It does not create DNS
-// records: pass the hostname you intend to use and wire A/AAAA records from
-// Ipv4Address and Ipv6Address with whatever DNS provider you use. Certbot on the
-// host retries until DNS resolves, so the ordering takes care of itself.
+// The component creates a droplet and a firewall restricting it to the ports the
+// service needs. The firewall is not optional.
+//
+// It does not create DNS records: pass the hostname you intend to use and wire
+// A/AAAA records from Ipv4Address and Ipv6Address with whatever DNS provider you
+// use. Certbot on the host retries with backoff, though not indefinitely, so
+// records created in the same update are fine if they resolve within the window.
 package bootstraprelay
 
 import (
@@ -40,12 +43,19 @@ type Args struct {
 	// Region is the DigitalOcean region slug. Defaults to fra1.
 	Region pulumi.StringInput
 
-	// Size is the DigitalOcean droplet size slug. Defaults to s-2vcpu-2gb.
+	// Size is the DigitalOcean droplet size slug. Defaults to s-2vcpu-4gb, which
+	// is sized for production; override it for test deployments.
 	Size pulumi.StringInput
 
 	// SshKeys are DigitalOcean SSH key fingerprints to authorise for root. Empty
 	// by default: this component never attaches keys you did not ask for.
 	SshKeys pulumi.StringArrayInput
+
+	// SshSourceAddresses narrows which CIDRs may reach SSH. Optional: when
+	// SshKeys is set and this is empty, port 22 is open to any source, which is
+	// what an operator with a dynamic address needs. Set it when the addresses
+	// are stable enough to be worth maintaining.
+	SshSourceAddresses pulumi.StringArrayInput
 
 	// Tags are applied to the droplet.
 	Tags pulumi.StringArrayInput
@@ -71,6 +81,9 @@ type BootstrapRelay struct {
 
 	// Droplet is the underlying DigitalOcean droplet.
 	Droplet *digitalocean.Droplet
+
+	// Firewall restricts inbound traffic to the ports the service needs.
+	Firewall *digitalocean.Firewall
 
 	Ipv4Address pulumi.StringOutput
 	Ipv6Address pulumi.StringOutput
@@ -135,7 +148,13 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		return nil, err
 	}
 
+	firewall, err := newFirewall(ctx, name, component, droplet, args.SshKeys != nil, args.SshSourceAddresses)
+	if err != nil {
+		return nil, err
+	}
+
 	component.Droplet = droplet
+	component.Firewall = firewall
 	component.Ipv4Address = droplet.Ipv4Address
 	component.Ipv6Address = droplet.Ipv6Address
 	component.Hostname = hostname

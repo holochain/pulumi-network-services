@@ -66,22 +66,47 @@ address in order to attempt a direct connection. Losing it does not take the ser
 down — peers fall back to relaying — so it tends to fail quietly as degraded
 connectivity rather than an outage.
 
-This component creates no firewall, and DigitalOcean droplets have none by default,
-so both ports are reachable as deployed. If you put a `digitalocean.Firewall` in
-front of it, note that 7842 is **UDP**: an inbound rule that only covers TCP will let
-the service look healthy while silently forcing every peer onto the relay.
+The component creates a `digitalocean.Firewall` and attaches it. This is not
+optional, because the port matrix is the part a consumer has to rediscover to get
+right, and the two entries most easily missed both fail *quietly*:
 
-#### You provide the SSH keys
+| Port | Protocol | Why it must be open |
+| --- | --- | --- |
+| 443 | TCP | Bootstrap and relay |
+| 7842 | UDP | QAD. A TCP-only rule set leaves the service looking healthy while forcing every peer onto relaying |
+| 80 | TCP | Certbot. `certonly --standalone` uses HTTP-01, at renewal as well as first issue — closing it means certificates stop renewing 90 days later |
+| — | ICMP | Path MTU Discovery. Blocking it black-holes large QUIC packets intermittently |
 
-`SshKeys` is empty by default, which means nobody can SSH into the droplet. Pass the
-DigitalOcean fingerprints you want authorised:
+Egress is left open. A DigitalOcean firewall with no outbound rules denies *all*
+egress, which would strand cloud-init before it finished — apt, the container
+registry and the ACME challenge all need to get out.
+
+#### SSH follows the keys
+
+`SshKeys` is empty by default, so nobody can SSH in and port 22 stays closed.
+Attaching keys opens it — from any source, unless you narrow it:
+
+```go
+SshKeys:            pulumi.StringArray{pulumi.String("aa:bb:cc:...")},
+SshSourceAddresses: pulumi.StringArray{pulumi.String("203.0.113.0/24")}, // optional
+```
+
+Open-by-default is deliberate. Operators generally have dynamic addresses, and a
+source list that must be rotated is one that goes stale or gets widened in a hurry
+during an incident — neither of which is better than relying on the key pair, which
+is the real control. Set `SshSourceAddresses` when your addresses are stable enough
+to be worth maintaining.
+
+Port 22 stays shut when no keys are attached, and that matters: DigitalOcean only
+sets a root password when a droplet has no keys, so opening it in that case would
+expose password authentication.
+
+Filter `digitalocean.GetSshKeys` rather than passing all of it — every fingerprint
+you pass gets root:
 
 ```go
 keys, err := digitalocean.GetSshKeys(ctx, &digitalocean.GetSshKeysArgs{}, nil)
 ```
-
-Filter that result rather than passing all of it — every fingerprint you pass gets
-root.
 
 #### Updates replace the droplet
 
@@ -129,10 +154,13 @@ is the thing that actually matters, so it gets an explicit contract:
 | Bump | Means |
 | --- | --- |
 | **MAJOR** | A Go API break, or a change that replaces your resources *even if you pinned every argument* |
-| **MINOR** | New components, new optional arguments, or a `DefaultContainerImage` bump |
+| **MINOR** | New components, new optional arguments, or a change to a default you can override — `DefaultContainerImage`, the droplet size, the region |
 | **PATCH** | Fixes that change nothing you have deployed |
 
-The line between MAJOR and MINOR is whether pinning saves you.
+The line between MAJOR and MINOR is whether pinning saves you. That is why a change
+to the droplet's OS image is MAJOR rather than MINOR: it is not exposed as an
+argument, so it replaces the droplet of every consumer, including those who pinned
+everything they could.
 
 **Pin `ContainerImage` to a literal in production.** If you leave it unset you get
 `DefaultContainerImage`, and a MINOR release can move that — which replaces your
