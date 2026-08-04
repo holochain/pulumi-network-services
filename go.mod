@@ -3,8 +3,8 @@ module github.com/holochain/pulumi-network-services
 go 1.26.5
 
 require (
-	github.com/pulumi/pulumi-digitalocean/sdk/v4 v4.75.0
-	github.com/pulumi/pulumi/sdk/v3 v3.253.0
+	github.com/pulumi/pulumi-digitalocean/sdk/v4 v4.78.0
+	github.com/pulumi/pulumi/sdk/v3 v3.255.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -16,7 +16,6 @@ require (
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -101,7 +100,6 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
