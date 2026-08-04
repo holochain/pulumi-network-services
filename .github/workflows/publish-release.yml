@@ -1,0 +1,164 @@
+name: Publish release
+
+# Stage two of two. Runs on every push to main, but does nothing unless the head
+# commit came from a pull request labelled `hra-release` — that is, a pull request
+# opened by prepare-release.yml. When it did, this tags the commit and creates the
+# GitHub release.
+#
+# There is no registry publish step. A Go module is distributed by tag: once the
+# tag is pushed, proxy.golang.org serves it on the first request for that version.
+# That also makes this the point of no return, since a version the proxy has served
+# can never be changed.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  CLIFF_CONFIG_URL: https://raw.githubusercontent.com/holochain/release-integration/refs/heads/main/pre-1.0-cliff.toml
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check whether this commit came from a release pull request
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.HRA2_GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" \
+                  --jq '[.[] | select(.labels[]?.name == "hra-release")] | first // empty')"
+
+          if [ -z "$pr" ]; then
+            echo "Head commit did not come from an hra-release pull request; nothing to publish."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          title="$(printf '%s' "$pr" | jq -r '.title')"
+          number="$(printf '%s' "$pr" | jq -r '.number')"
+
+          # The title is written by prepare-release.yml as "Prepare release vX.Y.Z".
+          # Extract with a strict pattern rather than trusting the string: it reaches
+          # a git command below, and a pull request title is editable.
+          version="$(printf '%s' "$title" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || true)"
+          if [ -z "$version" ]; then
+            echo "::error::pull request #${number} is labelled hra-release but its title does not end in a version"
+            exit 1
+          fi
+
+          if ! git check-ref-format "refs/tags/${version}"; then
+            echo "::error::'${version}' is not a valid git tag name"
+            exit 1
+          fi
+
+          # An existing tag on this very commit means a previous run pushed the tag
+          # but did not finish creating the release. That is recoverable, and the
+          # rerun should complete it rather than refuse. A tag pointing anywhere
+          # else is a genuine conflict.
+          if git rev-parse -q --verify "refs/tags/${version}" >/dev/null; then
+            existing="$(git rev-list -n 1 "refs/tags/${version}")"
+            if [ "$existing" != "$HEAD_SHA" ]; then
+              echo "::error::tag ${version} already exists and points at ${existing}, not ${HEAD_SHA}"
+              exit 1
+            fi
+            echo "::notice::tag ${version} already exists on this commit; resuming the unfinished release"
+          fi
+
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${version} from #${number}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install git-cliff
+        if: steps.gate.outputs.release == 'true'
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        with:
+          tool: git-cliff@2.12.0
+
+      - name: Tag and create the release
+        if: steps.gate.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.HRA2_GITHUB_TOKEN }}
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          git config --local user.name "Holochain Release Automation"
+          git config --local user.email "hra+gh@holochain.org"
+
+          # Credentials are not persisted by checkout, so address the remote with
+          # the token explicitly. Actions masks it in the log.
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # Every step below is written to be safe to repeat, because pushing the
+          # tag is irreversible: the Go module proxy will serve that version
+          # permanently. A run that dies partway must be completable by a rerun.
+
+          # 1. Tag locally. git cliff --latest reads this, so it has to exist
+          #    before the notes are generated.
+          if ! git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
+            git tag -a "$VERSION" -m "$VERSION"
+          fi
+
+          # 2. Generate the notes before pushing. This is the fallible part, and
+          #    failing here should leave nothing published.
+          git cliff --config-url "$CLIFF_CONFIG_URL" --latest --strip=all --output RELEASE_NOTES.md
+
+          # 3. Push the tag, unless a previous run already did.
+          if [ -z "$(git ls-remote --tags "$remote" "refs/tags/${VERSION}")" ]; then
+            git push "$remote" "refs/tags/${VERSION}"
+          else
+            echo "::notice::tag ${VERSION} is already on the remote"
+          fi
+
+          # 4. Create the release only if it is missing, so a rerun after a failed
+          #    release creation finishes the job instead of erroring.
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::notice::release ${VERSION} already exists"
+          else
+            # Pre-release versions are never marked as the latest release.
+            prerelease=""
+            case "$VERSION" in
+              *-*) prerelease="--prerelease --latest=false" ;;
+            esac
+
+            # shellcheck disable=SC2086
+            gh release create "$VERSION" --title "$VERSION" --notes-file RELEASE_NOTES.md $prerelease
+          fi
+
+      - name: Confirm the module proxy can serve the new version
+        if: steps.gate.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Read go.mod directly rather than shelling out to go, so this step does
+          # not depend on a Go toolchain being present.
+          module="$(awk '/^module /{print $2; exit}' go.mod)"
+
+          # The proxy indexes a new tag lazily, so poll rather than assume.
+          for attempt in $(seq 1 10); do
+            if curl -fsS "https://proxy.golang.org/${module}/@v/${VERSION}.info" >/dev/null; then
+              echo "proxy.golang.org is serving ${module}@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Attempt ${attempt}: proxy has not indexed ${VERSION} yet."
+            sleep 15
+          done
+
+          # The release is already tagged and published, so this is a warning
+          # rather than a failure; the proxy fetches on the first real request.
+          echo "::warning::proxy.golang.org has not indexed ${VERSION} yet. It will fetch on first use."

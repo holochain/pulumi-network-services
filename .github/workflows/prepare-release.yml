@@ -1,0 +1,123 @@
+name: Prepare a release
+
+# Stage one of two. Computes the next version from the commit history, writes
+# CHANGELOG.md, and opens a pull request labelled `hra-release`. Merging that PR
+# is what triggers publish-release.yml to create the tag.
+#
+# The tag is deliberately created last. A Go module version is immutable once
+# proxy.golang.org has served it, so tagging before the changelog is merged would
+# permanently publish a version that does not contain its own release notes.
+#
+# This mirrors holochain/actions' prepare-release.yml, minus the version bump:
+# Go has no manifest version to set. A module's version is its tag, which is why
+# holochain_release_util (which reads Cargo.toml) cannot be reused here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_version:
+        type: string
+        description: "Semver version for the next release, e.g. v0.2.0, overriding the computed bump"
+        default: ""
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  CLIFF_CONFIG_URL: https://raw.githubusercontent.com/holochain/release-integration/refs/heads/main/pre-1.0-cliff.toml
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      # workflow_dispatch can be run from any ref. publish-release.yml only fires
+      # on pushes to main, so a release prepared from anywhere else would produce
+      # a pull request that never publishes when merged. Fail loudly instead.
+      - name: Require dispatch from main
+        if: github.ref_name != 'main'
+        # Via env, not inline interpolation: git permits backticks and $() in
+        # branch names, so the ref would otherwise reach the shell as code.
+        env:
+          DISPATCH_REF: ${{ github.ref_name }}
+        run: |
+          echo "::error::Releases are prepared from main. This was dispatched from '${DISPATCH_REF}'."
+          echo "::error::Release branches are not supported yet; publish-release.yml only triggers on main."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Explicit, so the checked-out branch cannot drift from the pull request
+          # base below.
+          ref: main
+          # git-cliff derives the version from tags and the full commit history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install git-cliff
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        with:
+          tool: git-cliff@2.12.0
+
+      - name: Generate changelog
+        id: changelog
+        env:
+          FORCE_VERSION: ${{ inputs.force_version }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$FORCE_VERSION" ]; then
+            version="$FORCE_VERSION"
+            git cliff --config-url "$CLIFF_CONFIG_URL" --tag "$version" --output CHANGELOG.md
+          else
+            version="$(git cliff --config-url "$CLIFF_CONFIG_URL" --bumped-version)"
+            git cliff --config-url "$CLIFF_CONFIG_URL" --bump --output CHANGELOG.md
+          fi
+
+          if ! printf '%s' "$version" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::refusing to prepare a release for unusable version '$version'"
+            exit 1
+          fi
+
+          # The pattern above still admits refs git will not accept, such as
+          # v1.2.3-rc..1 or a trailing dot. Let git be the authority on its own
+          # ref syntax rather than trying to encode it in a regex.
+          if ! git check-ref-format "refs/tags/$version"; then
+            echo "::error::'$version' is not a valid git tag name"
+            exit 1
+          fi
+
+          # A Go module tag cannot be moved once the proxy has served it, so a
+          # collision has to stop here rather than be discovered at publish time.
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "::error::tag $version already exists"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Prepared $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create a release pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          # Not GITHUB_TOKEN: pull requests it opens do not trigger workflows, so
+          # the required ci_pass check would never run and the PR could not merge.
+          token: ${{ secrets.HRA2_GITHUB_TOKEN }}
+          author: '${{ github.actor }} <${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com>'
+          committer: "Holochain Release Automation <hra+gh@holochain.org>"
+          # Explicit rather than defaulted to the checked-out branch: merging into
+          # anything but main would not trigger publish-release.yml.
+          base: main
+          # publish-release.yml reads the version back out of this title.
+          title: "Prepare release ${{ steps.changelog.outputs.version }}"
+          # Skipped by the changelog config's commit parsers, so the release
+          # preparation does not appear in the changelog it generates.
+          commit-message: "chore: Prepare next release"
+          branch: "prepare-release"
+          branch-suffix: "short-commit-hash"
+          labels: "hra-release"
+          body: |
+            Automated release preparation for **${{ steps.changelog.outputs.version }}**, triggered by ${{ github.actor }}.
+
+            Merging this pull request tags `${{ steps.changelog.outputs.version }}` and creates the GitHub release.
+            The tag is immutable once the Go module proxy has served it, so review the changelog before merging.
