@@ -72,6 +72,15 @@ type Args struct {
 	// RustLog sets RUST_LOG for the service. Defaults to "warn".
 	RustLog pulumi.StringInput
 
+	// AuthHookServer is the base URL of an auth server implementing the sbd
+	// authentication hook specification. When set, peers must authenticate before
+	// using this relay. Must be an https:// URL: the tokens it returns cross the
+	// public internet.
+	//
+	// Prefer NewAuthenticated over setting this by hand — it provisions both hosts
+	// and wires this from the auth server's own URL.
+	AuthHookServer pulumi.StringInput
+
 	// ExtraArgs are appended to the kitsune2-bootstrap-srv command line.
 	ExtraArgs pulumi.StringArrayInput
 }
@@ -125,6 +134,7 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		args.ContactEmail.ToStringOutput(),
 		inputs.StringOr(args.ContainerImage, DefaultContainerImage),
 		inputs.StringOr(args.RustLog, defaultRustLog),
+		inputs.StringOr(args.AuthHookServer, ""),
 		inputs.StringArrayOrEmpty(args.ExtraArgs),
 	).ApplyT(func(templateArgs []interface{}) (string, error) {
 		return renderCloudInit(templateData{
@@ -132,7 +142,8 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 			ContactEmail:   templateArgs[1].(string),
 			ContainerImage: templateArgs[2].(string),
 			RustLog:        templateArgs[3].(string),
-			ExtraArgs:      templateArgs[4].([]string),
+			AuthHookServer: templateArgs[4].(string),
+			ExtraArgs:      templateArgs[5].([]string),
 		})
 	}).(pulumi.StringOutput)
 

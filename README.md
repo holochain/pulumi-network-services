@@ -81,7 +81,7 @@ Egress is left open. A DigitalOcean firewall with no outbound rules denies *all*
 egress, which would strand cloud-init before it finished — apt, the container
 registry and the ACME challenge all need to get out.
 
-#### SSH follows the keys
+#### Opens SSH only when keys are attached
 
 `SshKeys` is empty by default, so nobody can SSH in and port 22 stays closed.
 Attaching keys opens it — from any source, unless you narrow it:
@@ -170,7 +170,7 @@ auth, err := authserver.New(ctx, "auth", &authserver.Args{
 It creates a droplet, a **managed Valkey cluster**, and firewalls for both. It
 exports `Url`, `OpsUrl`, `Hostname`, `Ipv4Address` and `Ipv6Address`.
 
-#### The database is managed on purpose
+#### Uses a managed database
 
 Valkey holds the pending and approved keys — the record of who may join the
 network. DigitalOcean user data is immutable, so any configuration change replaces
@@ -198,6 +198,55 @@ to `/opt/auth_srv/auth.env` (mode `0600`) by cloud-init. DigitalOcean exposes us
 data through the droplet metadata service, so anything running on the host can read
 them. That is inherent to configuring a droplet this way rather than specific to
 this component, but it is worth knowing before you decide what else runs there.
+
+### The two together
+
+`NewAuthenticated` provisions both hosts and wires the relay's authentication hook
+to the auth server it just created, so the two cannot drift apart or be pointed at
+nothing:
+
+```go
+pair, err := bootstraprelay.NewAuthenticated(ctx, "network", &bootstraprelay.AuthenticatedArgs{
+    RelayHostname:      pulumi.String("relay.example.org"),
+    AuthHostname:       pulumi.String("auth.example.org"),
+    ContactEmail:       pulumi.String("ops@example.org"),
+    GithubClientId:     cfg.RequireSecret("github-client-id"),
+    GithubClientSecret: cfg.RequireSecret("github-client-secret"),
+    GithubOrg:          pulumi.String("holochain"),
+    GithubTeam:         pulumi.String("auth"),
+    SessionSecret:      cfg.RequireSecret("session-secret"),
+    ApiTokens:          cfg.RequireSecret("api-tokens"),
+})
+```
+
+Outputs are flat and prefixed — `RelayHostname`, `RelayUrl`, `RelayIpv4Address`,
+`RelayIpv6Address`, `AuthHostname`, `AuthUrl`, `AuthIpv4Address`, `AuthIpv6Address`
+and `AuthOpsUrl` — and the underlying components stay reachable as `.Relay` and
+`.Auth` for anything they do not cover.
+
+**Both hosts still need their own DNS records.** Create A records from the
+`Ipv4Address` outputs and AAAA records from the `Ipv6Address` outputs, for each host.
+
+`RelayHostname` and `AuthHostname` must differ. That is enforced, not just expected.
+
+#### Deploys to a single region
+
+`Region` applies to both droplets and the database; it cannot be set per host.
+Splitting them would put every authentication round-trip across the public internet
+for no benefit, so the argument does not offer the option.
+
+#### Using an auth server this library did not create
+
+`bootstraprelay.Args.AuthHookServer` takes the base URL directly, for a relay
+pointed at an auth server you run elsewhere:
+
+```go
+AuthHookServer: pulumi.String("https://auth.example.org"),
+```
+
+It must be an `https://` URL. Plain HTTP is rejected rather than discouraged: the
+hook returns the tokens that authorise peers onto the network, and they cross the
+public internet to get back.
 
 ## Versioning
 

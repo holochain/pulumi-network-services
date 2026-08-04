@@ -4,7 +4,7 @@ write_files:
   - content: |
       [Container]
       Image={{ .ContainerImage }}
-      Exec=kitsune2-bootstrap-srv --production --listen [::]:443 --tls-cert /etc/letsencrypt/live/{{ .Hostname }}/fullchain.pem --tls-key /etc/letsencrypt/live/{{ .Hostname }}/privkey.pem{{ range .ExtraArgs }} {{ . }}{{ end }}
+      Exec=kitsune2-bootstrap-srv --production --listen [::]:443 --tls-cert /etc/letsencrypt/live/{{ .Hostname }}/fullchain.pem --tls-key /etc/letsencrypt/live/{{ .Hostname }}/privkey.pem{{ if .AuthHookServer }} --authentication-hook-server {{ .AuthHookServer }}{{ end }}{{ range .ExtraArgs }} {{ . }}{{ end }}
       Environment=RUST_LOG={{ .RustLog }}
       Network=host
       Volume=/etc/letsencrypt:/etc/letsencrypt:ro

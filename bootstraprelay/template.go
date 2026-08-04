@@ -22,12 +22,13 @@ type templateData struct {
 	ContactEmail   string
 	ContainerImage string
 	RustLog        string
+	AuthHookServer string
 	ExtraArgs      []string
 }
 
 // renderCloudInit produces the cloud-init user data for a bootstrap/relay host.
 func renderCloudInit(data templateData) (string, error) {
-	if err := validate(data); err != nil {
+	if err := validateTemplateData(data); err != nil {
 		return "", err
 	}
 
