@@ -181,6 +181,13 @@ It is reachable only from its own droplet, via a `digitalocean.DatabaseFirewall`
 and the server connects over the cluster's **private** URI so Valkey traffic never
 crosses the public internet.
 
+The eviction policy is fixed at `noeviction` and is not configurable. The auth
+server sets no TTL on what it writes, so an `allkeys-*` policy would reclaim
+memory by dropping authorised keys — revoking a peer's access with no error and
+no audit trail. (A `volatile-*` policy would find nothing to evict, for the same
+reason.) `noeviction` fails the write instead, which is a failure an operator can
+see. If the cluster ever reaches that point, resize it via `DatabaseSize`.
+
 #### It is a public service
 
 Unlike a typical internal dependency, this cannot hide behind a private network:

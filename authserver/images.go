@@ -37,6 +37,21 @@ const (
 	// databaseEngine is Valkey, the Redis-compatible engine DigitalOcean offers.
 	// The server speaks the Redis protocol and takes a redis:// URL.
 	databaseEngine = "valkey"
+
+	// databaseEvictionPolicy is not exposed as an argument because there is only
+	// one correct value. The auth server sets no TTL on anything it writes: an
+	// `auth:{id}` hash and its `state:{state}` set membership live until an
+	// operator deletes them. Under any allkeys policy Valkey would reclaim that
+	// memory by dropping authorised keys, which revokes a peer's access with no
+	// error and no audit trail, and can leave the two structures disagreeing —
+	// an id still listed in a state set whose record is gone, which the ops
+	// console cannot show and which a fresh request cannot replace.
+	//
+	// The volatile policies find nothing to evict for the same reason, so they
+	// only obscure the intent. noeviction fails the write instead, which is the
+	// failure an operator can see and act on. It is also DigitalOcean's default;
+	// naming it keeps the guarantee ours rather than theirs.
+	databaseEvictionPolicy = "noeviction"
 )
 
 // minSessionSecretBytes mirrors the server's own floor. Its env.example calls for
