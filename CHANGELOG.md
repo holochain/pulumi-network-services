@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## \[[0.2.1](https://github.com/holochain/pulumi-network-services/compare/v0.2.0...v0.2.1)\] - 2026-08-07
+
+### Bug Fixes
+
+- Pin the Valkey eviction policy to noeviction by @ThetaSinner in [#10](https://github.com/holochain/pulumi-network-services/pull/10)
+  - The auth server sets no TTL on anything it writes: an `auth:{id}` hash and its `state:{state}` set membership live until an operator deletes them. Under any allkeys policy Valkey would reclaim memory by dropping authorised keys, which revokes a peer's access with no error and no audit trail, and can leave the two structures disagreeing — an id still listed in a state set whose record is gone, which the ops console cannot show and which a fresh request cannot replace because the hash still exists.
+  - Noeviction fails the write instead, which is a failure an operator can see.
+  - This is DigitalOcean's default, so no deployed cluster changes behaviour and the update is applied in place rather than replacing the cluster. Setting it explicitly makes the guarantee ours rather than theirs, and puts it in the preview diff if it ever drifts.
+  - Not exposed as an argument: there is one correct value, and the failure mode of the wrong one is silent.
+
 ## \[[0.2.0](https://github.com/holochain/pulumi-network-services/compare/v0.1.0...v0.2.0)\] - 2026-08-04
 
 ### Features
