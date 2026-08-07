@@ -76,6 +76,7 @@ func TestNewAppliesDefaults(t *testing.T) {
 			auth.Droplet.Size,
 			auth.Database.Region,
 			auth.Database.Engine,
+			auth.Database.EvictionPolicy,
 			auth.Url,
 			auth.OpsUrl,
 		).ApplyT(func(o []interface{}) error {
@@ -102,10 +103,20 @@ func TestNewAppliesDefaults(t *testing.T) {
 			if got := o[4].(string); got != databaseEngine {
 				t.Errorf("database engine = %q, want %q", got, databaseEngine)
 			}
-			if got := o[5].(string); got != "https://auth.example.test" {
+			// Only an allkeys-* policy could evict these keys — nothing the auth
+			// server writes carries a TTL, so volatile-* has nothing to act on —
+			// but that eviction is silent, so the value is an invariant rather
+			// than a default. Asserted as a literal so that changing
+			// databaseEvictionPolicy fails here instead of following it.
+			if policy, ok := o[5].(*string); !ok || policy == nil {
+				t.Errorf("database eviction policy is unset, want %q", "noeviction")
+			} else if *policy != "noeviction" {
+				t.Errorf("database eviction policy = %q, want %q", *policy, "noeviction")
+			}
+			if got := o[6].(string); got != "https://auth.example.test" {
 				t.Errorf("url = %q", got)
 			}
-			if got := o[6].(string); got != "https://auth.example.test/ops/auth" {
+			if got := o[7].(string); got != "https://auth.example.test/ops/auth" {
 				t.Errorf("opsUrl = %q", got)
 			}
 			return nil

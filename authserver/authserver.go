@@ -169,6 +169,9 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		Size:      inputs.StringOr(args.DatabaseSize, defaultDatabaseSize),
 		Region:    region,
 		NodeCount: pulumi.Int(1),
+		// This database is a record, not a cache. Set explicitly so the guarantee
+		// does not rest on a provider default we do not control.
+		EvictionPolicy: pulumi.String(databaseEvictionPolicy),
 	}, pulumi.Parent(component))
 	if err != nil {
 		return nil, err
