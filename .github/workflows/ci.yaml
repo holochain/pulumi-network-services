@@ -89,7 +89,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: holochain/actions/.github/workflows/changelog-preview-comment.yml@e3e5f19ffbf400997ff7a58bdcd489d1ab953eee # v1.17.0
+    uses: holochain/actions/.github/workflows/changelog-preview-comment.yml@832c0c654691d0ee736a12dab74832a48318fd30 # v1.18.0
 
   ci_pass:
     if: always()
