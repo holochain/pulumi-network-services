@@ -83,7 +83,7 @@ jobs:
 
       - name: Install git-cliff
         if: steps.gate.outputs.release == 'true'
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: git-cliff@2.12.0
 
