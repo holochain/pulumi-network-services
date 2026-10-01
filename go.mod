@@ -3,8 +3,8 @@ module github.com/holochain/pulumi-network-services
 go 1.26.6
 
 require (
-	github.com/pulumi/pulumi-digitalocean/sdk/v4 v4.79.0
-	github.com/pulumi/pulumi/sdk/v3 v3.262.0
+	github.com/pulumi/pulumi-digitalocean/sdk/v4 v4.81.0
+	github.com/pulumi/pulumi/sdk/v3 v3.263.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
