@@ -8,6 +8,8 @@ package dofirewall
 import (
 	"fmt"
 
+	"github.com/holochain/pulumi-network-services/internal/inputs"
+
 	"github.com/pulumi/pulumi-digitalocean/sdk/v4/go/digitalocean"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
@@ -43,18 +45,18 @@ type Args struct {
 	// Ports the component's own service binds.
 	Ports []Port
 
-	// SshPort is opened when AllowSsh is set.
+	// SshPort is opened when SshKeys resolves to a nonempty list.
 	SshPort int
 
-	// AllowSsh should be true when SSH keys are attached to the droplet.
+	// SshKeys are the keys attached to the droplet.
 	//
 	// Without keys there is nothing to open: DigitalOcean only sets a root
 	// password when no keys are attached, so leaving 22 open in that case would
 	// expose password authentication.
-	AllowSsh bool
+	SshKeys pulumi.StringArrayInput
 
 	// SshSourceAddresses narrows which CIDRs may reach SSH. When empty and
-	// AllowSsh is set, SSH is open to every source: operators have dynamic
+	// keys are attached, SSH is open to every source: operators have dynamic
 	// addresses, and a source list that must be rotated is one that goes stale or
 	// gets widened in a hurry. The key pair is the control, not the CIDR.
 	SshSourceAddresses pulumi.StringArrayInput
@@ -68,29 +70,32 @@ func New(
 	droplet *digitalocean.Droplet,
 	args Args,
 ) (*digitalocean.Firewall, error) {
-	inbound := digitalocean.FirewallInboundRuleArray{}
-	for _, p := range args.Ports {
-		rule := &digitalocean.FirewallInboundRuleArgs{
-			Protocol:        pulumi.String(p.Protocol),
-			SourceAddresses: anywhere,
+	inbound := inputs.StringArrayOrEmpty(args.SshKeys).ToStringArrayOutput().ApplyT(func(keys []string) digitalocean.FirewallInboundRuleArrayOutput {
+		inbound := digitalocean.FirewallInboundRuleArray{}
+		for _, p := range args.Ports {
+			rule := &digitalocean.FirewallInboundRuleArgs{
+				Protocol:        pulumi.String(p.Protocol),
+				SourceAddresses: anywhere,
+			}
+			if p.Protocol != "icmp" {
+				rule.PortRange = pulumi.String(fmt.Sprint(p.Number))
+			}
+			inbound = append(inbound, rule)
 		}
-		if p.Protocol != "icmp" {
-			rule.PortRange = pulumi.String(fmt.Sprint(p.Number))
-		}
-		inbound = append(inbound, rule)
-	}
 
-	if args.AllowSsh {
-		sources := args.SshSourceAddresses
-		if sources == nil {
-			sources = anywhere
+		if len(keys) > 0 {
+			sources := args.SshSourceAddresses
+			if sources == nil {
+				sources = anywhere
+			}
+			inbound = append(inbound, &digitalocean.FirewallInboundRuleArgs{
+				Protocol:        pulumi.String("tcp"),
+				PortRange:       pulumi.String(fmt.Sprint(args.SshPort)),
+				SourceAddresses: sources,
+			})
 		}
-		inbound = append(inbound, &digitalocean.FirewallInboundRuleArgs{
-			Protocol:        pulumi.String("tcp"),
-			PortRange:       pulumi.String(fmt.Sprint(args.SshPort)),
-			SourceAddresses: sources,
-		})
-	}
+		return inbound.ToFirewallInboundRuleArrayOutput()
+	}).(digitalocean.FirewallInboundRuleArrayOutput)
 
 	// A DigitalOcean firewall with no outbound rules denies all egress, which
 	// would strand cloud-init before it finished: apt, the container registry and

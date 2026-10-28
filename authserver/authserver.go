@@ -209,6 +209,7 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		})
 	}).(pulumi.StringOutput)
 
+	sshKeys := inputs.StringArrayOrEmpty(args.SshKeys)
 	droplet, err := digitalocean.NewDroplet(ctx, name, &digitalocean.DropletArgs{
 		Name:       pulumi.String(name),
 		Image:      pulumi.String(defaultOsImage),
@@ -217,7 +218,7 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		Ipv6:       inputs.BoolPtrOr(args.Ipv6, true),
 		Monitoring: inputs.BoolPtrOr(args.Monitoring, true),
 		Tags:       inputs.StringArrayOrEmpty(args.Tags),
-		SshKeys:    inputs.StringArrayOrEmpty(args.SshKeys),
+		SshKeys:    sshKeys,
 		UserData:   userData,
 	}, pulumi.Parent(component))
 	if err != nil {
@@ -231,7 +232,7 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 			dofirewall.ICMP,
 		},
 		SshPort:            portSsh,
-		AllowSsh:           args.SshKeys != nil,
+		SshKeys:            sshKeys,
 		SshSourceAddresses: args.SshSourceAddresses,
 	})
 	if err != nil {
