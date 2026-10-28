@@ -188,6 +188,24 @@ no audit trail. (A `volatile-*` policy would find nothing to evict, for the same
 reason.) `noeviction` fails the write instead, which is a failure an operator can
 see. If the cluster ever reaches that point, resize it via `DatabaseSize`.
 
+#### Protects the authorization database from deletion
+
+The Valkey resource has `pulumi.Protect(true)`. After applying this version,
+Pulumi refuses operations that delete or replace the database, including removing
+the component or running `pulumi destroy`. Only the database is protected by the
+component: application droplets and firewalls remain replaceable. This also
+applies when using `NewAuthenticated`.
+
+Adding protection to an existing stack does not resize or replace the database.
+Review `pulumi preview`, then apply the update to record protection in stack state.
+For an intentional deletion, use `pulumi state unprotect '<database-urn>'`
+immediately before the reviewed removal/destroy operation. Running the unchanged
+program again restores protection.
+
+This is a [Pulumi engine safeguard](https://www.pulumi.com/docs/iac/concepts/resources/options/protect/),
+not a DigitalOcean-side lock: it does not stop console/API deletion or application
+writes, and it is not a backup. No additional database hosting cost is incurred.
+
 #### It is a public service
 
 Unlike a typical internal dependency, this cannot hide behind a private network:
