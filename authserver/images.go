@@ -17,9 +17,8 @@ const (
 	// less than the relay does.
 	defaultSize = "s-1vcpu-2gb"
 
-	// The database holds pending and approved keys — a small key-value working
-	// set, not a workload that scales with peer traffic.
-	defaultDatabaseSize = "db-s-1vcpu-1gb"
+	// DigitalOcean requires at least 2 GiB per node for standby replication.
+	defaultDatabaseSize = "db-s-1vcpu-2gb"
 
 	// Pinned rather than tracking latest: a major engine version is not something
 	// a library should move under a consumer's live database.

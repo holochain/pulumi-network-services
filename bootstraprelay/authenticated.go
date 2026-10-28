@@ -60,7 +60,8 @@ type AuthenticatedArgs struct {
 	RelaySize pulumi.StringInput
 	AuthSize  pulumi.StringInput
 
-	// DatabaseSize is the managed Valkey cluster size slug.
+	// DatabaseSize is the managed Valkey size slug for each node. Defaults to
+	// db-s-1vcpu-2gb. Must support a standby: at least 2 GiB of RAM per node.
 	DatabaseSize pulumi.StringInput
 
 	// MaxPendingRequests caps how many unapproved key requests are retained.

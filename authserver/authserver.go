@@ -70,8 +70,8 @@ type Args struct {
 	// Size is the DigitalOcean droplet size slug. Defaults to s-1vcpu-2gb.
 	Size pulumi.StringInput
 
-	// DatabaseSize is the managed Valkey cluster size slug. Defaults to
-	// db-s-1vcpu-1gb.
+	// DatabaseSize is the managed Valkey size slug for each node. Defaults to
+	// db-s-1vcpu-2gb. Must support a standby: at least 2 GiB of RAM per node.
 	DatabaseSize pulumi.StringInput
 
 	// MaxPendingRequests caps how many unapproved key requests are held at once.
@@ -168,7 +168,7 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		Version:   pulumi.String(defaultDatabaseVersion),
 		Size:      inputs.StringOr(args.DatabaseSize, defaultDatabaseSize),
 		Region:    region,
-		NodeCount: pulumi.Int(1),
+		NodeCount: pulumi.Int(2), // One primary and one same-region standby.
 		// This database is a record, not a cache. Set explicitly so the guarantee
 		// does not rest on a provider default we do not control.
 		EvictionPolicy: pulumi.String(databaseEvictionPolicy),

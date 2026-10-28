@@ -177,6 +177,25 @@ network. DigitalOcean user data is immutable, so any configuration change replac
 the droplet; a containerised database would take that record with it. The cluster
 is a separate resource and survives droplet replacement.
 
+The cluster has one primary and one standby in the same `Region`. Each node
+defaults to `db-s-1vcpu-2gb`; `DatabaseSize` overrides the plan for both nodes.
+DigitalOcean requires at least 2 GiB of RAM per node for
+[standby replication and automatic promotion](https://docs.digitalocean.com/products/databases/valkey/how-to/add-standby-nodes/).
+This applies to both `authserver.New` and `NewAuthenticated`. Standbys improve
+availability; they are not backups or protection against a regional outage.
+
+At the published [Valkey prices](https://docs.digitalocean.com/products/databases/valkey/details/pricing/),
+the default database costs **$60 USD/month**: $30 for the primary and $30 for the
+standby, before tax. This is **$45/month more** than the previous single 1-GiB
+node. Larger `DatabaseSize` overrides also incur the matching standby's cost.
+
+**Existing deployments:** explicit 1-GiB `DatabaseSize` inputs must be changed to a
+standby-capable plan before applying this version. The pinned provider handles
+size/node-count changes through DigitalOcean's resize API; resource names, engine,
+and version are unchanged. Refresh and review `pulumi preview`: expect a cluster
+resize from one node to two, not database deletion/recreation. Do not apply an
+unexpected replacement plan.
+
 It is reachable only from its own droplet, via a `digitalocean.DatabaseFirewall`,
 and the server connects over the cluster's **private** URI so Valkey traffic never
 crosses the public internet.
