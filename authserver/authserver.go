@@ -133,6 +133,8 @@ type AuthServer struct {
 // Changing any argument that affects cloud-init replaces the droplet: user data is
 // immutable on DigitalOcean. The Valkey cluster is a separate resource and is not
 // replaced with it, so approved keys survive.
+// The database is protected against Pulumi deletion; application hosts and
+// firewalls remain replaceable unless the caller protects them separately.
 func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOption) (*AuthServer, error) {
 	if args == nil {
 		return nil, errors.New("authserver.New: args is required")
@@ -172,7 +174,7 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		// This database is a record, not a cache. Set explicitly so the guarantee
 		// does not rest on a provider default we do not control.
 		EvictionPolicy: pulumi.String(databaseEvictionPolicy),
-	}, pulumi.Parent(component))
+	}, pulumi.Parent(component), pulumi.Protect(true))
 	if err != nil {
 		return nil, err
 	}
