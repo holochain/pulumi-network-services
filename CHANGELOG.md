@@ -4,12 +4,6 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Features
-
-- Protect the auth server's managed Valkey resource from Pulumi deletion and replacement, including through `NewAuthenticated`, without protecting replaceable application hosts or firewalls. Existing stacks acquire protection on their next applied update; intentional database removal requires explicit unprotection.
-
 ## \[[0.2.1](https://github.com/holochain/pulumi-network-services/compare/v0.2.0...v0.2.1)\] - 2026-08-07
 
 ### Bug Fixes
