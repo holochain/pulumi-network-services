@@ -4,12 +4,6 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Changed
-
-- **Breaking deployment change:** auth databases now have one primary and one same-region standby, with a default plan of `db-s-1vcpu-2gb` per node. This applies to `authserver.New` and `NewAuthenticated`; explicit 1-GiB plans must be upgraded. The default database cost rises from $15 to $60 USD/month before tax. The existing cluster is resized rather than intentionally replaced; review the consumer's refreshed preview before applying.
-
 ## \[[0.2.1](https://github.com/holochain/pulumi-network-services/compare/v0.2.0...v0.2.1)\] - 2026-08-07
 
 ### Bug Fixes
